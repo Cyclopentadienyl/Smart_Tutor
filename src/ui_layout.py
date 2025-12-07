@@ -12,7 +12,18 @@ def create_ui():
     """
     建立 Gradio 介面
     """
-    # 修正：暫時移除 theme 參數以避免版本相容性錯誤
+    display_columns = [
+        config.COL_STUDENT_ID,
+        config.COL_AVG_SCORE,
+        config.COL_AVG_TIME,
+        config.COL_PROGRESS,
+        config.COL_GROUP,
+        config.COL_PROFICIENCY_SCORE,
+        config.COL_RECOMMENDED_LEVEL,
+        config.COL_WEAKNESS,
+        config.COL_PERSONALITY,
+    ]
+
     with gr.Blocks(title="AI 家教進度分派系統") as app:
         gr.Markdown("# 🎓 AI 輔助家教進度分派系統 (Phase 1)")
         
@@ -24,8 +35,19 @@ def create_ui():
                     btn_save = gr.Button("💾 儲存結果", interactive=False) # 初始不可按
                 
                 data_display = gr.Dataframe(
-                    headers=[config.COL_STUDENT_ID, config.COL_AVG_SCORE, config.COL_AVG_TIME, config.COL_GROUP],
-                    interactive=False
+                    column_names=display_columns,
+                    datatype=[
+                        "str",
+                        "number",
+                        "number",
+                        "number",
+                        "str",
+                        "number",
+                        "str",
+                        "str",
+                        "str",
+                    ],
+                    interactive=False,
                 )
                 
                 with gr.Row():
@@ -40,6 +62,12 @@ def create_ui():
 
         # --- 事件處理 (Event Handling) ---
         
+        def _format_for_table(df):
+            missing_columns = [col for col in display_columns if col not in df.columns]
+            for col in missing_columns:
+                df[col] = None
+            return df.reindex(columns=display_columns)
+
         def load_and_plot():
             """讀取資料並畫圖"""
             df = dm.load_data()
@@ -60,7 +88,7 @@ def create_ui():
             else:
                 fig_bar = None
                 
-            return df, fig_scatter, fig_bar
+            return _format_for_table(df), fig_scatter, fig_bar
 
         def run_ai_process():
             """執行 AI 邏輯"""
@@ -71,10 +99,10 @@ def create_ui():
             dm.save_results(processed_df)
             
             # 重新畫圖 (帶有分群顏色)
-            _, fig_s, fig_b = load_and_plot()
-            
+            formatted_df, fig_s, fig_b = load_and_plot()
+
             # 開放儲存按鈕
-            return processed_df, msg, fig_s, fig_b, gr.update(interactive=True)
+            return formatted_df, msg, fig_s, fig_b, gr.update(interactive=True)
 
         # 按鈕綁定
         btn_load.click(fn=load_and_plot, inputs=None, outputs=[data_display, plot_scatter, plot_bar])
