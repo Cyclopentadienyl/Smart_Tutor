@@ -13,7 +13,7 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 # --- 檔案名稱 ---
 STUDENT_DATA_FILE = os.path.join(RAW_DATA_DIR, "students_simulated.csv")
 TASK_LOG_FILE = os.path.join(RAW_DATA_DIR, "task_log.csv")
-MODEL_FILE_CLUSTERING = os.path.join(MODEL_DIR, "kmeans_model.pkl")
+MODEL_FILE_CLUSTERING = os.path.join(MODEL_DIR, "xgb_proficiency_model.pkl")
 MODEL_FILE_PREDICTION = os.path.join(MODEL_DIR, "predictor_model.pkl")
 
 # --- 資料欄位定義 (接口規範) ---
@@ -28,6 +28,7 @@ COL_PROGRESS = "current_progress"     # 目前進度 (單元 ID)
 # 輸出/預測目標 (Outputs/Targets)
 COL_GROUP = "assigned_group"          # 分群結果 (A/B/C)
 COL_RECOMMENDED_LEVEL = "rec_level"   # 推薦難度 (Easy/Medium/Hard)
+COL_PROFICIENCY_SCORE = "proficiency_score"  # XGBoost 預測的熟練度分數
 
 # --- 系統參數 ---
 RANDOM_SEED = 42
