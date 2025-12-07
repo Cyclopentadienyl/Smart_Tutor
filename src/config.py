@@ -19,17 +19,18 @@ MODEL_FILE_PREDICTION = os.path.join(MODEL_DIR, "predictor_model.pkl")
 # --- 資料欄位定義 (接口規範) ---
 # 輸入特徵 (Input Features)
 COL_STUDENT_ID = "student_id"
-COL_AVG_SCORE = "avg_score"           # 平均成績
-COL_AVG_TIME = "avg_completion_time"  # 平均完成時間 (分)
-COL_WEAKNESS = "weakness_tag"         # 弱點標籤 (如: 代數, 幾何)
-COL_PERSONALITY = "personality_type"  # 個性類型 (如: 積極, 被動)
-COL_PROGRESS = "current_progress"     # 目前進度 (單元 ID)
+COL_NAME = "name"
+COL_ACCURACY = "accuracy"  # 答題正確率 (0-1)
+COL_AVG_TIME = "avg_completion_time"  # 平均完成時間 (分鐘)
+COL_LEARNING_PACE = "learning_pace"  # 學習步調
+COL_ATTENDANCE = "attendance_rate"  # 出席率 (0-1)
+COL_HW_COMPLETION = "homework_completion_rate"  # 作業完成率 (0-1)
+COL_SCORE_HISTORY = "score_history"  # 歷史分數列表
+COL_ERROR_TYPES = "error_types"  # 錯誤類型 dict 字串
 
 # 輸出/預測目標 (Outputs/Targets)
-COL_GROUP = "assigned_group"          # 分群結果 (A/B/C)
-COL_RECOMMENDED_LEVEL = "rec_level"   # 推薦難度 (Easy/Medium/Hard)
-COL_PROFICIENCY_SCORE = "proficiency_score"  # XGBoost 預測的熟練度分數
+COL_GROUP = "Group"  # 以預測結果填充的分組標籤
+COL_RECOMMENDED_LEVEL = "Recommended_Level"  # 推薦難度 (Easy/Medium/Hard)
 
 # --- 系統參數 ---
 RANDOM_SEED = 42
-N_CLUSTERS = 3  # 預設分群數量

@@ -1,58 +1,105 @@
-import pandas as pd
-import numpy as np
 import os
+
+import numpy as np
+import pandas as pd
+
 from src import config
 
+
 class DataManager:
-    """
-    負責處理所有資料的讀取、寫入與模擬生成。
-    """
+    """負責資料讀取與生成 (含自動清洗空值功能)。"""
+
     def __init__(self):
         self.student_file = config.STUDENT_DATA_FILE
 
-    def generate_mock_data(self, num_students=100):
-        """
-        生成模擬的學生資料，用於初始化系統。
-        包含：成績、時間、弱點、個性等。
-        """
+    def generate_mock_data(self, num_students: int = 100) -> pd.DataFrame:
+        """生成模擬資料。"""
+        print(f"[Info] 正在生成新格式資料 (N={num_students})...")
         np.random.seed(config.RANDOM_SEED)
-        
-        ids = [f"S{str(i).zfill(3)}" for i in range(num_students)]
-        
-        # 模擬數據分佈
-        # 1. 成績 (0-100)
-        scores = np.random.normal(loc=70, scale=15, size=num_students)
-        scores = np.clip(scores, 0, 100).astype(int)
-        
-        # 2. 完成時間 (10-60分鐘) - 成績越好通常越快(負相關)，但也加入隨機性
-        times = 60 - (scores * 0.4) + np.random.normal(0, 5, num_students)
-        times = np.clip(times, 5, 90).astype(int)
-        
-        # 3. 類別型資料 (弱點、個性)
-        weaknesses = np.random.choice(['Algebra', 'Geometry', 'Calculus', 'Statistics'], num_students)
-        personalities = np.random.choice(['Proactive', 'Passive', 'Anxious', 'Steady'], num_students)
-        
-        df = pd.DataFrame({
-            config.COL_STUDENT_ID: ids,
-            config.COL_AVG_SCORE: scores,
-            config.COL_AVG_TIME: times,
-            config.COL_WEAKNESS: weaknesses,
-            config.COL_PERSONALITY: personalities,
-            config.COL_PROGRESS: np.random.randint(1, 10, num_students) # 目前進度單元 1-10
-        })
-        
-        # 存檔
+
+        ids = [f"S{str(i + 1).zfill(3)}" for i in range(num_students)]
+        names = [f"Student_{str(i + 1).zfill(3)}" for i in range(num_students)]
+
+        accuracies = np.round(np.random.uniform(0.4, 0.99, num_students), 2)
+        times = 30.0 - (accuracies * 20.0) + np.random.normal(0, 2, num_students)
+        times = np.round(np.clip(times, 5.0, 40.0), 1)
+        paces = np.round(np.random.uniform(5.0, 20.0, num_students), 1)
+        attendances = np.round(np.random.uniform(0.6, 1.0, num_students), 2)
+        hw_completions = np.round(np.random.uniform(0.5, 1.0, num_students), 2)
+
+        score_histories_str: list[str] = []
+        error_types_str: list[str] = []
+
+        for _ in range(num_students):
+            scores = np.random.randint(60, 100, 5).tolist()
+            score_histories_str.append(str(scores))
+
+            errors = {
+                "reading": int(np.random.randint(0, 5)),
+                "vocab": int(np.random.randint(0, 5)),
+                "logic": int(np.random.randint(0, 5)),
+            }
+            error_types_str.append(str(errors))
+
+        df = pd.DataFrame(
+            {
+                config.COL_STUDENT_ID: ids,
+                config.COL_NAME: names,
+                config.COL_ACCURACY: accuracies,
+                config.COL_AVG_TIME: times,
+                config.COL_SCORE_HISTORY: score_histories_str,
+                config.COL_ERROR_TYPES: error_types_str,
+                config.COL_LEARNING_PACE: paces,
+                config.COL_ATTENDANCE: attendances,
+                config.COL_HW_COMPLETION: hw_completions,
+            }
+        )
+
+        os.makedirs(os.path.dirname(self.student_file), exist_ok=True)
         df.to_csv(self.student_file, index=False)
-        print(f"[Info] 模擬資料已生成：{self.student_file}")
         return df
 
-    def load_data(self):
-        """讀取學生資料，如果不存在則自動生成"""
+    def load_data(self) -> pd.DataFrame:
+        """讀取本地資料並清洗空值。"""
         if not os.path.exists(self.student_file):
             return self.generate_mock_data()
-        return pd.read_csv(self.student_file)
 
-    def save_results(self, df):
-        """儲存包含分群或預測結果的資料表"""
+        try:
+            df = pd.read_csv(self.student_file)
+            original_len = len(df)
+            df = df.dropna(how="any")
+            if len(df) < original_len:
+                print(f"[Info] 已自動過濾 {original_len - len(df)} 筆空值資料")
+
+            if config.COL_ACCURACY not in df.columns:
+                print("[Warning] 舊格式資料，重新生成...")
+                return self.generate_mock_data()
+
+            return df
+        except Exception as exc:
+            print(f"[Error] {exc}，重新生成...")
+            return self.generate_mock_data()
+
+    def save_results(self, df: pd.DataFrame) -> str:
         df.to_csv(self.student_file, index=False)
         return "資料已更新並儲存。"
+
+    def load_uploaded_file(self, file_path: str) -> pd.DataFrame:
+        """讀取上傳檔案並立即清洗空值。"""
+        if file_path is None:
+            return pd.DataFrame()
+        try:
+            if file_path.endswith(".csv"):
+                df = pd.read_csv(file_path)
+            elif file_path.endswith(".xlsx") or file_path.endswith(".xls"):
+                df = pd.read_excel(file_path)
+            else:
+                return pd.DataFrame()
+
+            df = df.dropna(how="all")
+            df = df.dropna(subset=[config.COL_ACCURACY, config.COL_AVG_TIME])
+
+            return df
+        except Exception as exc:
+            print(f"[Error] 讀取失敗: {exc}")
+            return pd.DataFrame()

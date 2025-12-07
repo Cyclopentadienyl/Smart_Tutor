@@ -1,156 +1,230 @@
-import pandas as pd
-import numpy as np
+import ast
+import os
+
 import joblib
-from xgboost import XGBRegressor
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+from sklearn.preprocessing import LabelEncoder
+
 from src import config
-import torch  # 雖然目前主要用 Sklearn，但引入 Torch 以符合您的環境要求
 
 
 class TutorAI:
-    """
-    AI 核心類別：負責執行分群 (Clustering) 與 推薦 (Recommendation)。
-    使用 XGBoost 回歸模型預測學生熟練度，並依分段結果分群。
-    """
-
     def __init__(self):
-        self.proficiency_model: XGBRegressor | None = None
-        self.proficiency_thresholds: tuple[float, float] | None = None
-        self.feature_columns: list[str] | None = None
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"[System] AI Engine initialized on device: {self.device}")
+        self.xgb_model: xgb.XGBClassifier | None = None
+        self.label_encoder: LabelEncoder | None = None
+        self.le_file_path = os.path.join(config.MODEL_DIR, "label_encoder.pkl")
 
-    def _prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        將原始資料轉換成模型輸入特徵：
-        - 數值欄位：成績、完成時間、進度
-        - 類別欄位：弱點、個性 (one-hot)
-        """
-        numeric_features = df[
-            [config.COL_AVG_SCORE, config.COL_AVG_TIME, config.COL_PROGRESS]
-        ].astype(float)
+    def _get_expert_label(self, row: pd.Series) -> str:
+        """依據簡單規則生成監督標籤。"""
+        acc = row.get(config.COL_ACCURACY, 0)
+        att = row.get(config.COL_ATTENDANCE, 0)
+        hw = row.get(config.COL_HW_COMPLETION, 0)
+        score_sum = acc + att + hw
 
-        categorical = df[[config.COL_WEAKNESS, config.COL_PERSONALITY]].fillna("Unknown")
-        categorical_dummies = pd.get_dummies(
-            categorical, prefix=[config.COL_WEAKNESS, config.COL_PERSONALITY], dtype=float
-        )
-
-        features = pd.concat([numeric_features, categorical_dummies], axis=1)
-        self.feature_columns = features.columns.tolist()
-        return features
-
-    def _align_feature_columns(self, features: pd.DataFrame) -> pd.DataFrame:
-        """確保推論階段的特徵欄位與訓練時一致。"""
-        if not self.feature_columns:
-            self.feature_columns = features.columns.tolist()
-
-        for col in self.feature_columns:
-            if col not in features:
-                features[col] = 0.0
-        return features[self.feature_columns]
-
-    def _compute_proficiency_target(self, df: pd.DataFrame) -> pd.Series:
-        """以規則式計算 XGBoost 的監督目標 (熟練度分數)。"""
-        time_inverse = 100 - df[config.COL_AVG_TIME].clip(0, 100)
-        progress_component = df[config.COL_PROGRESS].fillna(0) * 5
-        return (
-            0.6 * df[config.COL_AVG_SCORE].astype(float)
-            + 0.3 * time_inverse.astype(float)
-            + 0.1 * progress_component.astype(float)
-        )
-
-    def _compute_thresholds(self, proficiency_values: pd.Series) -> tuple[float, float]:
-        q1 = float(np.quantile(proficiency_values, 0.33))
-        q2 = float(np.quantile(proficiency_values, 0.66))
-        self.proficiency_thresholds = (q1, q2)
-        return q1, q2
-
-    def _map_proficiency_to_group(self, proficiency_values: pd.Series) -> pd.Series:
-        if self.proficiency_thresholds is None:
-            self._compute_thresholds(proficiency_values)
-        q1, q2 = self.proficiency_thresholds
-
-        def assign_group(score: float) -> str:
-            if score <= q1:
-                return "C"
-            if score <= q2:
-                return "B"
-            return "A"
-
-        return proficiency_values.apply(assign_group)
-
-    def train_clustering(self, df: pd.DataFrame):
-        """
-        使用 XGBoostRegressor 預測熟練度，再依分數分段分群。
-        回傳：(分群標籤, 熟練度分數)
-        """
-        features = self._prepare_features(df)
-        targets = self._compute_proficiency_target(df)
-        aligned_features = self._align_feature_columns(features)
-
-        self.proficiency_model = XGBRegressor(
-            n_estimators=200,
-            max_depth=4,
-            learning_rate=0.08,
-            subsample=0.85,
-            colsample_bytree=0.9,
-            random_state=config.RANDOM_SEED,
-            objective="reg:squarederror",
-        )
-        self.proficiency_model.fit(aligned_features, targets)
-
-        predicted_proficiency = pd.Series(
-            self.proficiency_model.predict(aligned_features), index=df.index
-        )
-        thresholds = self._compute_thresholds(predicted_proficiency)
-        group_labels = self._map_proficiency_to_group(predicted_proficiency)
-
-        joblib.dump(
-            {
-                "model": self.proficiency_model,
-                "feature_columns": self.feature_columns,
-                "thresholds": thresholds,
-            },
-            config.MODEL_FILE_CLUSTERING,
-        )
-
-        return group_labels, predicted_proficiency
-
-    def predict_difficulty(self, group_label: str, proficiency_score: float) -> str:
-        """
-        根據分群與熟練度分數回傳教材難度。
-        """
-        if self.proficiency_thresholds is None:
-            # 沒有閾值時以群組優先
-            if group_label == "A":
-                return "Hard (Challenge)"
-            if group_label == "B":
-                return "Medium (Standard)"
-            return "Easy (Review)"
-
-        _, upper = self.proficiency_thresholds
-        if proficiency_score >= upper or group_label == "A":
+        if score_sum > 2.5:
             return "Hard (Challenge)"
-        if group_label == "B":
+        if score_sum > 1.8:
             return "Medium (Standard)"
         return "Easy (Review)"
 
-    def run_analysis_pipeline(self, df: pd.DataFrame):
-        """
-        執行完整的 AI 流程：分群 -> 標記 -> 推薦
-        """
-        if df.empty:
-            return df, "錯誤：無資料"
+    def _preprocess_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """解析錯誤型別與分數列表並清洗數值欄位。"""
+        df_proc = df.copy()
 
-        labels, proficiency_scores = self.train_clustering(df)
+        def parse_errors(val, key):
+            try:
+                if isinstance(val, str):
+                    parsed = ast.literal_eval(val)
+                else:
+                    parsed = val
+                return float(parsed.get(key, 0))
+            except Exception:
+                return 0.0
 
-        df = df.copy()
-        df[config.COL_GROUP] = labels
-        df[config.COL_PROFICIENCY_SCORE] = proficiency_scores.round(2)
-        df[config.COL_RECOMMENDED_LEVEL] = df.apply(
-            lambda row: self.predict_difficulty(
-                row[config.COL_GROUP], row[config.COL_PROFICIENCY_SCORE]
-            ),
-            axis=1,
+        if config.COL_ERROR_TYPES in df_proc.columns:
+            df_proc["err_reading"] = df_proc[config.COL_ERROR_TYPES].apply(
+                lambda x: parse_errors(x, "reading")
+            )
+            df_proc["err_vocab"] = df_proc[config.COL_ERROR_TYPES].apply(
+                lambda x: parse_errors(x, "vocab")
+            )
+            df_proc["err_logic"] = df_proc[config.COL_ERROR_TYPES].apply(
+                lambda x: parse_errors(x, "logic")
+            )
+        else:
+            df_proc["err_reading"] = 0.0
+            df_proc["err_vocab"] = 0.0
+            df_proc["err_logic"] = 0.0
+
+        def calc_mean_score(val):
+            try:
+                if isinstance(val, str):
+                    scores = ast.literal_eval(val)
+                else:
+                    scores = val
+                if isinstance(scores, list) and scores:
+                    return float(np.mean(scores))
+                return 0.0
+            except Exception:
+                return 0.0
+
+        if config.COL_SCORE_HISTORY in df_proc.columns:
+            df_proc["mean_score"] = df_proc[config.COL_SCORE_HISTORY].apply(calc_mean_score)
+        elif config.COL_AVG_SCORE in df_proc.columns:
+            df_proc["mean_score"] = pd.to_numeric(
+                df_proc[config.COL_AVG_SCORE], errors="coerce"
+            ).fillna(0.0)
+        else:
+            df_proc["mean_score"] = 0.0
+
+        num_cols = [
+            config.COL_ACCURACY,
+            config.COL_AVG_TIME,
+            config.COL_LEARNING_PACE,
+            config.COL_ATTENDANCE,
+            config.COL_HW_COMPLETION,
+        ]
+
+        for col in num_cols:
+            if col in df_proc.columns:
+                df_proc[col] = pd.to_numeric(df_proc[col], errors="coerce")
+
+        critical_cols = num_cols + ["mean_score", "err_reading", "err_vocab", "err_logic"]
+        valid_check_cols = [col for col in critical_cols if col in df_proc.columns]
+        df_proc = df_proc.dropna(subset=valid_check_cols)
+
+        return df_proc
+
+    def _get_feature_columns(self) -> list[str]:
+        return [
+            config.COL_ACCURACY,
+            config.COL_AVG_TIME,
+            config.COL_LEARNING_PACE,
+            config.COL_ATTENDANCE,
+            config.COL_HW_COMPLETION,
+            "mean_score",
+            "err_reading",
+            "err_vocab",
+            "err_logic",
+        ]
+
+    def train_prediction_model(self, df: pd.DataFrame) -> pd.DataFrame:
+        """訓練 XGBoost 分類模型以預測推薦難度。"""
+        df_proc = self._preprocess_data(df)
+        if df_proc.empty:
+            return df
+
+        features = df_proc[self._get_feature_columns()]
+        df_aligned = df.loc[df_proc.index].copy()
+
+        if config.COL_RECOMMENDED_LEVEL not in df_aligned.columns:
+            labels = df_aligned.apply(self._get_expert_label, axis=1)
+            df_aligned[config.COL_RECOMMENDED_LEVEL] = labels
+        else:
+            labels = df_aligned[config.COL_RECOMMENDED_LEVEL]
+
+        self.label_encoder = LabelEncoder()
+        y_encoded = self.label_encoder.fit_transform(labels)
+
+        self.xgb_model = xgb.XGBClassifier(
+            n_estimators=100,
+            learning_rate=0.1,
+            max_depth=5,
+            random_state=config.RANDOM_SEED,
+            eval_metric="mlogloss",
+        )
+        self.xgb_model.fit(features, y_encoded)
+
+        joblib.dump(self.xgb_model, config.MODEL_FILE_PREDICTION)
+        joblib.dump(self.label_encoder, self.le_file_path)
+
+        return df_aligned
+
+    def predict_single(
+        self,
+        acc: float,
+        time: float,
+        pace: float,
+        att: float,
+        hw: float,
+        e_read: float,
+        e_vocab: float,
+        e_logic: float,
+        m_score: float,
+    ) -> str:
+        if self.xgb_model is None:
+            if os.path.exists(config.MODEL_FILE_PREDICTION):
+                self.xgb_model = joblib.load(config.MODEL_FILE_PREDICTION)
+            else:
+                return "⚠️ 模型尚未訓練"
+
+        if self.label_encoder is None and os.path.exists(self.le_file_path):
+            self.label_encoder = joblib.load(self.le_file_path)
+
+        input_data = pd.DataFrame(
+            {
+                config.COL_ACCURACY: [acc],
+                config.COL_AVG_TIME: [time],
+                config.COL_LEARNING_PACE: [pace],
+                config.COL_ATTENDANCE: [att],
+                config.COL_HW_COMPLETION: [hw],
+                "mean_score": [m_score],
+                "err_reading": [e_read],
+                "err_vocab": [e_vocab],
+                "err_logic": [e_logic],
+            }
         )
 
-        return df, "分析完成！模型已使用 XGBoost 更新分群與推薦。"
+        try:
+            pred_idx = self.xgb_model.predict(input_data[self._get_feature_columns()])[0]
+            if self.label_encoder:
+                return self.label_encoder.inverse_transform([pred_idx])[0]
+            return str(pred_idx)
+        except Exception as exc:
+            return f"Error: {exc}"
+
+    def run_analysis_pipeline(self, df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+        if df.empty:
+            return df, "無資料"
+
+        df_clean = self.train_prediction_model(df)
+        log: list[str] = [f"✅ XGBoost 訓練完成 (有效資料: {len(df_clean)} 筆)"]
+
+        df_proc = self._preprocess_data(df_clean)
+        predictions = self.xgb_model.predict(df_proc[self._get_feature_columns()])
+        predicted_labels = self.label_encoder.inverse_transform(predictions)
+
+        df_clean.loc[df_proc.index, config.COL_RECOMMENDED_LEVEL] = predicted_labels
+        df_clean.loc[df_proc.index, config.COL_GROUP] = predicted_labels
+        log.append("✅ XGBoost 推論完成")
+
+        return df_clean, "\n".join(log)
+
+    def run_inference_only(self, df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+        if df.empty:
+            return df, "❌ 檔案為空"
+
+        df_proc = self._preprocess_data(df)
+        if df_proc.empty:
+            return df, "❌ 資料清洗後為空"
+
+        df_clean = df.loc[df_proc.index].copy()
+
+        if os.path.exists(config.MODEL_FILE_PREDICTION) and os.path.exists(self.le_file_path):
+            self.xgb_model = joblib.load(config.MODEL_FILE_PREDICTION)
+            self.label_encoder = joblib.load(self.le_file_path)
+
+            predictions = self.xgb_model.predict(df_proc[self._get_feature_columns()])
+            predicted_labels = self.label_encoder.inverse_transform(predictions)
+
+            df_clean[config.COL_RECOMMENDED_LEVEL] = predicted_labels
+            df_clean[config.COL_GROUP] = predicted_labels
+            log = "✅ 舊 XGBoost 模型推論完成"
+        else:
+            df_clean[config.COL_RECOMMENDED_LEVEL] = "Unknown"
+            df_clean[config.COL_GROUP] = "Unknown"
+            log = "⚠️ 無法載入模型"
+
+        return df_clean, log
