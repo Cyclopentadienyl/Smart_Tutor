@@ -27,6 +27,9 @@ COL_ATTENDANCE = "attendance_rate"  # 出席率 (0-1)
 COL_HW_COMPLETION = "homework_completion_rate"  # 作業完成率 (0-1)
 COL_SCORE_HISTORY = "score_history"  # 歷史分數列表
 COL_ERROR_TYPES = "error_types"  # 錯誤類型 dict 字串
+COL_RISK_LEVEL = "Risk_Status"  # 風險等級 (🔴/🟡/🟢)
+COL_CURRENT_TOPIC = "Current_Topic" # 當前進度章節
+COL_LAST_ACTIVE = "Last_Active"     # 最後上線時間
 
 # 輸出/預測目標 (Outputs/Targets)
 COL_GROUP = "Group"  # 以預測結果填充的分組標籤

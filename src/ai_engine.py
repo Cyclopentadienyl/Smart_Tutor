@@ -16,6 +16,37 @@ class TutorAI:
         self.label_encoder: LabelEncoder | None = None
         self.le_file_path = os.path.join(config.MODEL_DIR, "label_encoder.pkl")
 
+    def batch_evaluate_risk(self, df: pd.DataFrame) -> pd.DataFrame:
+        """為全班學生生成風險燈號與當前狀態"""
+        df_out = df.copy()
+        
+        # 確保有預測結果
+        if config.COL_RECOMMENDED_LEVEL not in df_out.columns:
+            # 如果還沒跑過模型，先跑一次簡單規則
+            df_out[config.COL_RECOMMENDED_LEVEL] = df_out.apply(self._get_expert_label, axis=1)
+
+        def assess_risk(row):
+            acc = row.get(config.COL_ACCURACY, 0)
+            att = row.get(config.COL_ATTENDANCE, 0)
+            
+            # 風險邏輯：準確率低 或 出席率低 -> 紅燈
+            if acc < 0.6 or att < 0.7:
+                return "🔴 High Risk"
+            elif acc < 0.75:
+                return "🟡 Warning"
+            else:
+                return "🟢 On Track"
+
+        df_out[config.COL_RISK_LEVEL] = df_out.apply(assess_risk, axis=1)
+        
+        # 模擬分配「當前章節」(隨機分配給 demo 用)
+        # 在真實系統中，這會從資料庫讀取
+        import random
+        topics = ["M101-基礎代數", "M102-幾何圖形", "E201-閱讀理解", "M103-進階應用"]
+        df_out[config.COL_CURRENT_TOPIC] = [random.choice(topics) for _ in range(len(df_out))]
+        
+        return df_out
+
     def _get_expert_label(self, row: pd.Series) -> str:
         """依據簡單規則生成監督標籤。"""
         acc = row.get(config.COL_ACCURACY, 0)
