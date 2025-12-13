@@ -198,13 +198,13 @@ def create_ui():
         # Logic Functions (邏輯實作區)
         # =========================================
 
-        # --- 1. 原版繪圖函數 (完全保留) ---
+        # --- 1. 原版繪圖函數 (優化大數據處理) ---
         def draw_plots(df: pd.DataFrame):
             # 防呆：檢查必要欄位
             cols_to_check = [col for col in [config.COL_ACCURACY, config.COL_AVG_TIME] if col in df.columns]
             df = df.dropna(subset=cols_to_check)
 
-            # Scatter Plot (Matplotlib)
+            # Scatter Plot (Matplotlib) - 優化大數據顯示
             fig_scatter = None
             if not df.empty:
                 try:
@@ -214,44 +214,92 @@ def create_ui():
                     y_col = config.COL_ACCURACY
                     group_col = config.COL_GROUP if config.COL_GROUP in df.columns else None
 
+                    # 根據數據量調整顯示參數
+                    n_samples = len(df)
+                    if n_samples > 500:
+                        # 大數據：減小點大小，增加透明度
+                        point_size = 20
+                        point_alpha = 0.3
+                    else:
+                        point_size = 80
+                        point_alpha = 0.7
+
                     if group_col:
                         groups = sorted(df[group_col].unique())
                         colors = plt.cm.tab10(np.linspace(0, 1, len(groups)))
                         for idx, group in enumerate(groups):
                             sub_df = df[df[group_col] == group]
                             if len(sub_df) == 0: continue
-                            ax.scatter(sub_df[x_col], sub_df[y_col], label=f"Group {group}", color=colors[idx], alpha=0.7, s=80)
+                            ax.scatter(sub_df[x_col], sub_df[y_col],
+                                     label=f"Group {group}",
+                                     color=colors[idx],
+                                     alpha=point_alpha,
+                                     s=point_size,
+                                     edgecolors='none')  # 移除邊框以提高性能
                             # 回歸線
                             if len(sub_df) > 1:
                                 try:
                                     slope, intercept = np.polyfit(sub_df[x_col], sub_df[y_col], 1)
                                     x_line = np.linspace(sub_df[x_col].min(), sub_df[x_col].max(), 100)
-                                    ax.plot(x_line, slope * x_line + intercept, color=colors[idx], linestyle="--", alpha=0.9)
-                                except: pass
-                        ax.legend(title="Groups")
+                                    ax.plot(x_line, slope * x_line + intercept,
+                                          color=colors[idx],
+                                          linestyle="--",
+                                          alpha=0.9,
+                                          linewidth=2)
+                                except Exception as e:
+                                    print(f"回歸線計算失敗 ({group}): {e}")
+                        ax.legend(title="Groups", loc='best')
                     else:
-                        ax.scatter(df[x_col], df[y_col], c="tab:blue", alpha=0.7, s=80)
-                    
-                    ax.set_xlabel("平均完成時間 (分)")
-                    ax.set_ylabel("正確率 (Accuracy)")
-                    ax.set_title("學生學習狀態分佈", fontname="Microsoft JhengHei", fontsize=14)
+                        ax.scatter(df[x_col], df[y_col],
+                                 c="tab:blue",
+                                 alpha=point_alpha,
+                                 s=point_size,
+                                 edgecolors='none')
+
+                    ax.set_xlabel("平均完成時間 (分)", fontsize=11)
+                    ax.set_ylabel("正確率 (Accuracy)", fontsize=11)
+                    title = f"學生學習狀態分佈 (N={n_samples})"
+                    ax.set_title(title, fontname="Microsoft JhengHei", fontsize=14)
                     ax.grid(True, linestyle="--", alpha=0.4)
                     fig.tight_layout()
                     fig_scatter = fig
                 except Exception as exc:
-                    print(f"Plot Error: {exc}")
+                    print(f"Scatter Plot Error: {exc}")
+                    import traceback
+                    traceback.print_exc()
 
-            # Bar Plot (Plotly)
+            # Bar Plot (Plotly) - 添加錯誤處理
             fig_bar = None
-            if not df.empty and config.COL_RECOMMENDED_LEVEL in df.columns:
-                fig_bar = px.histogram(
-                    df,
-                    x=config.COL_RECOMMENDED_LEVEL,
-                    title="AI 推薦難度分佈",
-                    text_auto=True,
-                    color=config.COL_RECOMMENDED_LEVEL,
-                )
-            
+            if not df.empty:
+                try:
+                    if config.COL_RECOMMENDED_LEVEL in df.columns:
+                        # 檢查是否有有效數據
+                        level_counts = df[config.COL_RECOMMENDED_LEVEL].value_counts()
+                        if not level_counts.empty:
+                            fig_bar = px.histogram(
+                                df,
+                                x=config.COL_RECOMMENDED_LEVEL,
+                                title=f"AI 推薦難度分佈 (N={len(df)})",
+                                text_auto=True,
+                                color=config.COL_RECOMMENDED_LEVEL,
+                                category_orders={
+                                    config.COL_RECOMMENDED_LEVEL: ["Easy (Review)", "Medium (Standard)", "Hard (Challenge)"]
+                                }
+                            )
+                            fig_bar.update_layout(
+                                showlegend=True,
+                                xaxis_title="推薦難度",
+                                yaxis_title="學生數量"
+                            )
+                        else:
+                            print(f"警告：{config.COL_RECOMMENDED_LEVEL} 欄位為空")
+                    else:
+                        print(f"警告：資料中缺少 {config.COL_RECOMMENDED_LEVEL} 欄位")
+                except Exception as exc:
+                    print(f"Bar Plot Error: {exc}")
+                    import traceback
+                    traceback.print_exc()
+
             return fig_scatter, fig_bar
 
         # --- 2. 原版資料載入 (完全保留) ---
