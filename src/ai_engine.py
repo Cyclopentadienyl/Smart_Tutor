@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import accuracy_score
 
 from src import config
 
@@ -141,10 +143,42 @@ class TutorAI:
             "err_logic",
         ]
 
-    def train_prediction_model(self, df: pd.DataFrame) -> pd.DataFrame:
-        """訓練 XGBoost 分類模型以預測推薦難度。"""
+    def train_prediction_model(
+        self,
+        df: pd.DataFrame,
+        test_size: float = 0.2,
+        n_estimators: int = 100,
+        max_depth: int = 5,
+        learning_rate: float = 0.1,
+        subsample: float = 1.0,
+        colsample_bytree: float = 1.0,
+        use_cv: bool = False,
+        cv_folds: int = 5,
+        return_details: bool = False
+    ) -> pd.DataFrame | tuple[pd.DataFrame, dict]:
+        """
+        訓練 XGBoost 分類模型以預測推薦難度。
+
+        參數:
+            df: 輸入資料
+            test_size: 驗證集比例 (0.0-0.5)
+            n_estimators: Boosting 迭代次數
+            max_depth: 樹的最大深度
+            learning_rate: 學習率
+            subsample: 每次迭代的樣本採樣比例
+            colsample_bytree: 每棵樹的特徵採樣比例
+            use_cv: 是否執行交叉驗證
+            cv_folds: 交叉驗證的折數
+            return_details: 是否返回訓練詳情（用於進階UI）
+
+        返回:
+            如果 return_details=False: 返回 df_aligned (向後兼容)
+            如果 return_details=True: 返回 (df_aligned, training_info)
+        """
         df_proc = self._preprocess_data(df)
         if df_proc.empty:
+            if return_details:
+                return df, {}
             return df
 
         features = df_proc[self._get_feature_columns()]
@@ -159,18 +193,81 @@ class TutorAI:
         self.label_encoder = LabelEncoder()
         y_encoded = self.label_encoder.fit_transform(labels)
 
-        self.xgb_model = xgb.XGBClassifier(
-            n_estimators=100,
-            learning_rate=0.1,
-            max_depth=5,
-            random_state=config.RANDOM_SEED,
-            eval_metric="mlogloss",
-        )
-        self.xgb_model.fit(features, y_encoded)
+        # 初始化訓練信息字典
+        training_info = {}
 
+        # Train/Val Split (用於可視化訓練過程)
+        X_train, X_val, y_train, y_val = train_test_split(
+            features, y_encoded,
+            test_size=test_size,
+            random_state=config.RANDOM_SEED,
+            stratify=y_encoded
+        )
+
+        # 設定 XGBoost 模型
+        self.xgb_model = xgb.XGBClassifier(
+            n_estimators=int(n_estimators),
+            learning_rate=float(learning_rate),
+            max_depth=int(max_depth),
+            subsample=float(subsample),
+            colsample_bytree=float(colsample_bytree),
+            random_state=config.RANDOM_SEED,
+            eval_metric=["mlogloss", "merror"],
+            early_stopping_rounds=10
+        )
+
+        # 訓練模型（記錄 train & val 的 metrics）
+        self.xgb_model.fit(
+            X_train, y_train,
+            eval_set=[(X_train, y_train), (X_val, y_val)],
+            verbose=False
+        )
+
+        # 儲存模型
         joblib.dump(self.xgb_model, config.MODEL_FILE_PREDICTION)
         joblib.dump(self.label_encoder, self.le_file_path)
 
+        # 如果需要返回詳細信息
+        if return_details:
+            # 1. 訓練歷程
+            training_info['history'] = self.xgb_model.evals_result()
+
+            # 2. 驗證集準確率
+            y_pred = self.xgb_model.predict(X_val)
+            training_info['val_accuracy'] = accuracy_score(y_val, y_pred)
+
+            # 3. 特徵重要性
+            feature_names = self._get_feature_columns()
+            importance = self.xgb_model.feature_importances_
+            training_info['feature_importance'] = dict(zip(feature_names, importance))
+
+            # 4. Cross-Validation (可選)
+            if use_cv:
+            # 創建一個不帶 early_stopping 的臨時模型用於 CV
+                cv_model = xgb.XGBClassifier(
+                    n_estimators=int(n_estimators),
+                    learning_rate=float(learning_rate),
+                    max_depth=int(max_depth),
+                    subsample=float(subsample),
+                    colsample_bytree=float(colsample_bytree),
+                    random_state=config.RANDOM_SEED,
+                    eval_metric="mlogloss"
+                    # ✅ 不設置 early_stopping_rounds
+                )
+
+                cv_scores = cross_val_score(
+                    cv_model,  # ✅ 使用新的模型
+                    features, y_encoded,
+                    cv=cv_folds,
+                    scoring='accuracy'
+                )
+                training_info['cv_scores'] = cv_scores.tolist()
+                training_info['cv_mean'] = float(np.mean(cv_scores))
+                training_info['cv_std'] = float(np.std(cv_scores))
+
+            return df_aligned, training_info
+
+        # 向後兼容：默認只返回 DataFrame
         return df_aligned
 
     def predict_single(
