@@ -12,13 +12,13 @@ class DataManager:
     def __init__(self):
         self.student_file = config.STUDENT_DATA_FILE
 
-    def generate_mock_data(self, num_students: int = 100) -> pd.DataFrame:
+    def generate_mock_data(self, num_students: int = 1000) -> pd.DataFrame:
         """生成模擬資料。"""
         print(f"[Info] 正在生成新格式資料 (N={num_students})...")
         np.random.seed(config.RANDOM_SEED)
 
-        ids = [f"S{str(i + 1).zfill(3)}" for i in range(num_students)]
-        names = [f"Student_{str(i + 1).zfill(3)}" for i in range(num_students)]
+        ids = [f"S{str(i + 1).zfill(4)}" for i in range(num_students)]
+        names = [f"Student_{str(i + 1).zfill(4)}" for i in range(num_students)]
 
         accuracies = np.round(np.random.uniform(0.4, 0.99, num_students), 2)
         times = 30.0 - (accuracies * 20.0) + np.random.normal(0, 2, num_students)

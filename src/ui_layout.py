@@ -97,9 +97,9 @@ def create_ui():
                         gr.Markdown("#### ⚙️ 超參數設定")
 
                         hp_lr = gr.Slider(
-                            0.01, 0.5, value=0.1, step=0.01,
+                            0.001, 0.5, value=0.1, step=0.001,
                             label="Learning Rate (學習率)",
-                            info="控制每次更新的步長。越小訓練越穩定但越慢，建議 0.01-0.3"
+                            info="控制每次更新的步長。越小訓練越穩定但越慢，建議 0.01-0.3（可嘗試 0.001-0.01 防止過擬合）"
                         )
 
                         hp_rounds = gr.Slider(
