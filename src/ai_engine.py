@@ -243,8 +243,21 @@ class TutorAI:
 
             # 4. Cross-Validation (可選)
             if use_cv:
+                # 創建一個不帶 early_stopping 的臨時模型用於 CV
+                # 因為 cross_val_score 內部 fit() 時不會提供 eval_set
+                cv_model = xgb.XGBClassifier(
+                    n_estimators=int(n_estimators),
+                    learning_rate=float(learning_rate),
+                    max_depth=int(max_depth),
+                    subsample=float(subsample),
+                    colsample_bytree=float(colsample_bytree),
+                    random_state=config.RANDOM_SEED,
+                    eval_metric="mlogloss"
+                    # 注意：這裡不設置 early_stopping_rounds
+                )
+
                 cv_scores = cross_val_score(
-                    self.xgb_model, features, y_encoded,
+                    cv_model, features, y_encoded,
                     cv=cv_folds,
                     scoring='accuracy'
                 )
