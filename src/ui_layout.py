@@ -89,9 +89,84 @@ def create_ui():
             # Tab 3: 🤖 AI 分析核心 (Original Tab 2)
             # =========================================
             with gr.Tab("🧠 AI 核心訓練"):
-                gr.Markdown("### 執行 AI 演算法")
-                btn_run_ai = gr.Button("🚀 開始 AI 訓練與分析", variant="primary")
-                result_log = gr.Textbox(label="日誌", interactive=False)
+                gr.Markdown("### 🛠️ 模型超參數調整與訓練視覺化")
+
+                with gr.Row():
+                    # 左側：超參數控制面板
+                    with gr.Column(scale=1):
+                        gr.Markdown("#### ⚙️ 超參數設定")
+
+                        hp_lr = gr.Slider(
+                            0.01, 0.5, value=0.1, step=0.01,
+                            label="Learning Rate (學習率)",
+                            info="控制每次更新的步長。越小訓練越穩定但越慢，建議 0.01-0.3"
+                        )
+
+                        hp_rounds = gr.Slider(
+                            10, 500, value=100, step=10,
+                            label="Boosting Rounds (訓練輪數)",
+                            info="模型迭代次數。越多越複雜，但可能過擬合，建議 50-200"
+                        )
+
+                        hp_depth = gr.Slider(
+                            1, 10, value=5, step=1,
+                            label="Max Depth (樹深度)",
+                            info="決策樹的最大深度。越深模型越複雜，建議 3-7"
+                        )
+
+                        hp_subsample = gr.Slider(
+                            0.5, 1.0, value=1.0, step=0.05,
+                            label="Subsample (樣本採樣比例)",
+                            info="每次迭代使用的樣本比例。小於 1.0 可防止過擬合"
+                        )
+
+                        hp_colsample = gr.Slider(
+                            0.5, 1.0, value=1.0, step=0.05,
+                            label="Colsample Bytree (特徵採樣比例)",
+                            info="每棵樹使用的特徵比例。降低可增加隨機性，防止過擬合"
+                        )
+
+                        hp_test_size = gr.Slider(
+                            0.1, 0.5, value=0.2, step=0.05,
+                            label="Validation Split (驗證集比例)",
+                            info="用於測試模型的資料比例。建議 0.2 (20%)"
+                        )
+
+                        gr.Markdown("#### 🔄 交叉驗證 (Cross-Validation)")
+                        hp_use_cv = gr.Checkbox(
+                            label="啟用交叉驗證",
+                            value=False,
+                            info="使用 K-Fold CV 評估模型穩定性（會增加訓練時間）"
+                        )
+
+                        hp_cv_folds = gr.Slider(
+                            3, 10, value=5, step=1,
+                            label="CV Folds (折數)",
+                            info="交叉驗證的折數，建議 5",
+                            visible=False
+                        )
+
+                        btn_run_ai_advanced = gr.Button(
+                            "🚀 開始訓練與分析",
+                            variant="primary",
+                            size="lg"
+                        )
+
+                        # 指標顯示
+                        metric_output = gr.Markdown("### 📊 訓練結果\n尚未訓練")
+
+                    # 右側：視覺化輸出
+                    with gr.Column(scale=2):
+                        gr.Markdown("#### 📈 訓練過程視覺化")
+                        loss_plot = gr.Plot(label="Loss Convergence Curve (收斂曲線)")
+                        feat_imp_plot = gr.Plot(label="Feature Importance (特徵重要性)")
+
+                # 條件顯示 CV Folds
+                hp_use_cv.change(
+                    fn=lambda x: gr.update(visible=x),
+                    inputs=[hp_use_cv],
+                    outputs=[hp_cv_folds]
+                )
 
             # =========================================
             # Tab 4: 🧑‍🎓 個人能力診斷 (Original Tab 3)
@@ -204,6 +279,94 @@ def create_ui():
             fig_s, fig_b = draw_plots(processed_df)
             return processed_df, processed_df, msg, fig_s, fig_b # 更新 shared_df
 
+        # --- 3b. 🆕 進階訓練流程 (支援超參數與視覺化) ---
+        def run_training_pipeline_advanced(lr, rounds, depth, subsample, colsample, test_size, use_cv, cv_folds):
+            """進階訓練流程：支援超參數調整與訓練過程視覺化"""
+            df = dm.load_data()
+            if df.empty:
+                empty_msg = "### ❌ 錯誤\n無資料可訓練，請先載入資料"
+                return None, None, empty_msg, df
+
+            # 呼叫更新後的訓練函數（開啟 return_details）
+            processed_df, training_info = ai.train_prediction_model(
+                df,
+                test_size=test_size,
+                n_estimators=rounds,
+                max_depth=depth,
+                learning_rate=lr,
+                subsample=subsample,
+                colsample_bytree=colsample,
+                use_cv=use_cv,
+                cv_folds=cv_folds,
+                return_details=True  # 關鍵：獲取訓練詳情
+            )
+
+            # 儲存結果
+            dm.save_results(processed_df)
+
+            # === 1. 繪製 Loss Convergence Curve ===
+            history = training_info.get('history', {})
+            if history:
+                epochs = len(history['validation_0']['mlogloss'])
+                x_axis = list(range(1, epochs + 1))
+
+                fig_loss, ax = plt.subplots(figsize=(8, 5))
+                ax.plot(x_axis, history['validation_0']['mlogloss'], label='Train Loss', linewidth=2, marker='o', markersize=4)
+                ax.plot(x_axis, history['validation_1']['mlogloss'], label='Val Loss', linestyle='--', linewidth=2, marker='s', markersize=4)
+                ax.set_xlabel('Boosting Rounds (Epochs)', fontsize=12)
+                ax.set_ylabel('Log Loss', fontsize=12)
+                ax.set_title('XGBoost Training Convergence', fontsize=14, fontweight='bold')
+                ax.legend(fontsize=11)
+                ax.grid(True, alpha=0.3, linestyle='--')
+                plt.tight_layout()
+            else:
+                fig_loss = None
+
+            # === 2. 繪製 Feature Importance ===
+            feat_imp = training_info.get('feature_importance', {})
+            if feat_imp:
+                imp_df = pd.DataFrame(list(feat_imp.items()), columns=['Feature', 'Importance'])
+                imp_df = imp_df.sort_values(by='Importance', ascending=True)
+
+                fig_imp = px.bar(
+                    imp_df,
+                    x='Importance',
+                    y='Feature',
+                    orientation='h',
+                    title='AI 決策依據：特徵重要性分析',
+                    text_auto='.3f',
+                    color='Importance',
+                    color_continuous_scale='Blues'
+                )
+                fig_imp.update_layout(height=400, showlegend=False)
+            else:
+                fig_imp = None
+
+            # === 3. 生成訓練結果摘要 ===
+            val_acc = training_info.get('val_accuracy', 0)
+            result_text = f"### ✅ 訓練完成！\n\n"
+            result_text += f"- **驗證集準確率 (Val Accuracy)**: `{val_acc:.2%}`\n"
+
+            # 判斷收斂狀態
+            if history and len(history['validation_1']['mlogloss']) > 5:
+                final_val_loss = history['validation_1']['mlogloss'][-1]
+                prev_val_loss = history['validation_1']['mlogloss'][-5]
+                if final_val_loss < prev_val_loss:
+                    result_text += f"- **收斂狀態**: 🟢 Loss 持續下降，模型健康\n"
+                else:
+                    result_text += f"- **收斂狀態**: 🟡 Loss 波動，可能已收斂或需調整參數\n"
+
+            # 如果有 CV 結果
+            if 'cv_mean' in training_info:
+                cv_mean = training_info['cv_mean']
+                cv_std = training_info['cv_std']
+                result_text += f"- **交叉驗證準確率**: `{cv_mean:.2%} ± {cv_std:.2%}`\n"
+                result_text += f"- **CV 分數列表**: {[f'{s:.2%}' for s in training_info['cv_scores']]}\n"
+
+            result_text += f"\n模型已保存至 `{config.MODEL_FILE_PREDICTION}`"
+
+            return fig_loss, fig_imp, result_text, processed_df
+
         # --- 4. 原版單人預測 (完全保留) ---
         def predict_user(acc, time, pace, att, hw, e_read, e_vocab, e_logic, m_score):
             result = str(ai.predict_single(acc, time, pace, att, hw, e_read, e_vocab, e_logic, m_score))
@@ -297,8 +460,12 @@ def create_ui():
         btn_load.click(load_default_data, outputs=[shared_df, data_display, plot_scatter, plot_bar, import_log])
         btn_analyze_file.click(process_uploaded_file, inputs=[file_input], outputs=[shared_df, data_display, plot_scatter, plot_bar, import_log])
 
-        # Tab 3: 訓練事件
-        btn_run_ai.click(run_training_pipeline, outputs=[shared_df, data_display, result_log, plot_scatter, plot_bar])
+        # Tab 3: 訓練事件 (新版進階訓練)
+        btn_run_ai_advanced.click(
+            run_training_pipeline_advanced,
+            inputs=[hp_lr, hp_rounds, hp_depth, hp_subsample, hp_colsample, hp_test_size, hp_use_cv, hp_cv_folds],
+            outputs=[loss_plot, feat_imp_plot, metric_output, shared_df]
+        )
 
         # Tab 4: 預測事件
         btn_predict_user.click(

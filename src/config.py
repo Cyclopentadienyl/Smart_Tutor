@@ -26,6 +26,7 @@ COL_LEARNING_PACE = "learning_pace"  # 學習步調
 COL_ATTENDANCE = "attendance_rate"  # 出席率 (0-1)
 COL_HW_COMPLETION = "homework_completion_rate"  # 作業完成率 (0-1)
 COL_SCORE_HISTORY = "score_history"  # 歷史分數列表
+COL_AVG_SCORE = "avg_score"  # 平均分數（替代方案，若無 score_history）
 COL_ERROR_TYPES = "error_types"  # 錯誤類型 dict 字串
 COL_RISK_LEVEL = "Risk_Status"  # 風險等級 (🔴/🟡/🟢)
 COL_CURRENT_TOPIC = "Current_Topic" # 當前進度章節
