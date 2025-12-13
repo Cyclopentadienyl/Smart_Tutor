@@ -250,11 +250,27 @@ def create_ui():
                                     print(f"回歸線計算失敗 ({group}): {e}")
                         ax.legend(title="Groups", loc='best')
                     else:
+                        # 未分組：顯示所有數據點
                         ax.scatter(df[x_col], df[y_col],
                                  c="tab:blue",
                                  alpha=point_alpha,
                                  s=point_size,
                                  edgecolors='none')
+
+                        # 繪製整體回歸線
+                        if len(df) > 1:
+                            try:
+                                slope, intercept = np.polyfit(df[x_col], df[y_col], 1)
+                                x_line = np.linspace(df[x_col].min(), df[x_col].max(), 100)
+                                ax.plot(x_line, slope * x_line + intercept,
+                                      color='red',
+                                      linestyle='--',
+                                      alpha=0.8,
+                                      linewidth=2.5,
+                                      label=f'趨勢線 (y={slope:.3f}x+{intercept:.3f})')
+                                ax.legend(loc='best')
+                            except Exception as e:
+                                print(f"回歸線計算失敗: {e}")
 
                     ax.set_xlabel("平均完成時間 (分)", fontsize=11)
                     ax.set_ylabel("正確率 (Accuracy)", fontsize=11)
